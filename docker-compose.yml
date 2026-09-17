@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      ARTIFACT_DIR: /app/artifacts
+      DATABASE_PATH: /app/runtime-data/predictions.db
+      ALLOW_UNAPPROVED_MODEL: ${ALLOW_UNAPPROVED_MODEL:-false}
+    volumes:
+      - ./artifacts:/app/artifacts:ro
+      - ./runtime-data:/app/runtime-data
+    restart: unless-stopped

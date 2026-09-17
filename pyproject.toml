@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "melting-tank-kpi-mlops-serving"
+version = "0.3.0"
+description = "FastAPI serving project for the melting-tank next-minute NG model"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi==0.116.1",
+  "uvicorn[standard]==0.35.0",
+  "tensorflow-cpu==2.20.0",
+  "numpy==2.2.6",
+  "scikit-learn==1.7.2",
+  "joblib==1.5.1",
+]
+
+[project.optional-dependencies]
+dev = ["httpx==0.28.1", "pytest==8.4.1", "ruff==0.12.9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
