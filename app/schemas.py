@@ -9,7 +9,7 @@ class SensorReading(BaseModel):
     ## 각 센서값에 현실적인 입력 범위를 적용하여 비정상 요청 차단
     MELT_TEMP: float = Field(ge=0, le=2000)
     MOTORSPEED: float = Field(ge=0, le=5000)
-    MELT_WEIGHT: float = Field(ge=0, le=5000)
+    MELT_WEIGHT: float = Field(ge=0, le=100000)
 
 
 class PredictionRequest(BaseModel):
