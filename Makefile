@@ -1,4 +1,4 @@
-.PHONY: install test lint run docker-up docker-down
+.PHONY: install test lint check run docker-up docker-down
 
 install:
 	python -m pip install -e ".[dev]"
@@ -8,6 +8,8 @@ test:
 
 lint:
 	python -m ruff check .
+
+check: lint test
 
 run:
 	python -m uvicorn app.main:app --reload

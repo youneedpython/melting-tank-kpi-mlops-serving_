@@ -7,6 +7,7 @@ services:
       ARTIFACT_DIR: /app/artifacts
       DATABASE_PATH: /app/runtime-data/predictions.db
       ALLOW_UNAPPROVED_MODEL: ${ALLOW_UNAPPROVED_MODEL:-false}
+      MODEL_ARTIFACT_S3_URI: ${MODEL_ARTIFACT_S3_URI:-}
     volumes:
       - ./artifacts:/app/artifacts:ro
       - ./runtime-data:/app/runtime-data
