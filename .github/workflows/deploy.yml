@@ -1,0 +1,96 @@
+name: Deploy to AWS ECS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v4.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Verify source before deployment
+        run: |
+          python -m ruff check .
+          python -m pytest
+
+      - name: Configure temporary AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Sign in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push immutable image
+        id: image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          image_uri="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          if aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "The immutable image already exists; reusing $image_uri"
+          else
+            docker build --tag "$image_uri" .
+            docker push "$image_uri"
+          fi
+          echo "uri=$image_uri" >> "$GITHUB_OUTPUT"
+
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "${{ vars.ECS_TASK_DEFINITION }}" \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Insert the new image into the task definition
+        id: task-definition
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ vars.ECS_CONTAINER_NAME }}
+          image: ${{ steps.image.outputs.uri }}
+
+      - name: Deploy the new task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-definition.outputs.task-definition }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          service: ${{ vars.ECS_SERVICE }}
+          wait-for-service-stability: true
+
+      - name: Check health and model readiness
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          curl --fail --retry 12 --retry-delay 10 "${APP_BASE_URL}/healthz"
+          curl --fail --retry 12 --retry-delay 10 "${APP_BASE_URL}/readyz"

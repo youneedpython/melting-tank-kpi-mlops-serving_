@@ -1,33 +1,47 @@
-# Melting Tank KPI MLOps Serving (v3)
+# Melting Tank KPI MLOps Serving (v4)
 
-v2 학습 파이프라인이 만든 모델 번들로 **현재 1분의 센서값 10개를 입력받아 다음 1분의 NG 발생 여부**를 예측하는 별도 서빙 저장소입니다.
+현재 1분의 센서값 10개로 다음 1분의 NG 발생 여부를 예측하는 FastAPI 서빙 프로젝트입니다. v3의 로컬·Docker 서빙을 유지하면서 v4에서 **S3 모델 번들, ECR, ECS Fargate, ALB, CloudFormation, GitHub Actions OIDC 기반 CI/CD**를 추가합니다.
 
-## 프로젝트 범위
+## 버전별 책임
 
-- FastAPI 추론 API와 OpenAPI 문서
-- v2 모델·스케일러·메타데이터 계약 검증
-- KPI 승인 모델만 허용하는 readiness/serving gate
-- 예측 결과 SQLite 저장 및 간단한 운영 대시보드
-- API Docker 이미지와 Compose 실행
+| 버전 | 저장소 | 핵심 책임 |
+|---|---|---|
+| v1 | modeling | Notebook 기반 데이터 이해·LSTM 기준 모델·평가 |
+| v2 | modeling | Python 학습 파이프라인·MLflow·KPI 승인 판정 |
+| v3 | serving | 승인 모델 계약 검증·FastAPI·SQLite·Docker |
+| v4 | serving | AWS 인프라·컨테이너 배포·GitHub Actions CI/CD |
 
-학습, 임계값 재탐색, MLflow Tracking Server는 modeling 저장소(v2)의 책임이며 이 저장소에는 포함하지 않습니다.
+학습과 임계값 선택은 modeling 저장소의 책임입니다. serving 저장소는 모델을 다시 학습하지 않고 `deployment_approved: true`인 번들만 기본 정책에서 추론합니다.
 
-## 구조
+## v4 배포 구조
 
 ```text
-app/             FastAPI, 모델 로더, SQLite, 대시보드
-artifacts/       v2 MLflow Run에서 받은 모델 번들(커밋 제외)
-runtime-data/    예측 SQLite 파일(커밋 제외)
-scripts/         API 통합 확인 요청
-tests/           API·게이트·저장소 단위 테스트
-docs/            v2-v3 연결과 실행 절차
+승인 모델 번들 ── 게시 스크립트 ──> S3 models/approved/
+                                        │ ECS Task Role
+                                        ▼
+GitHub ── Actions(OIDC) ──> ECR ──> ECS Fargate ──> ALB ──> 사용자
+              │                         │
+              └── 테스트·이미지 배포    └── CloudWatch Logs
 ```
 
-## 빠른 실행
+장기 Access Key는 GitHub에 저장하지 않습니다. GitHub Actions가 OIDC로 AWS 역할을 일시적으로 인수합니다.
 
-1. v2의 승인된 `model_bundle` 파일 4개를 `artifacts/`에 둡니다.
-2. v2에서 사용한 Python 3.11/3.12 가상환경을 활성화합니다.
-3. 의존성과 프로젝트를 설치하고 테스트합니다.
+## 프로젝트 구조
+
+```text
+.github/workflows/   PR·develop CI와 v4 태그/수동 ECS 배포
+app/                 FastAPI, S3 번들 동기화, 모델 로더, SQLite, 대시보드
+artifacts/           로컬 모델 번들(커밋 제외)
+infra/               foundation/service CloudFormation 템플릿
+runtime-data/        예측 SQLite 파일(커밋 제외)
+scripts/             API 확인 및 승인 모델 S3 게시
+tests/               API·게이트·S3 주소·게시 정책 단위 테스트
+docs/                버전 연결, 실행, 브랜치, AWS 배포 절차
+```
+
+## 로컬 실행
+
+v2에서 생성한 `model.keras`, `scaler.joblib`, `model_config.json`, `metrics.json`을 `artifacts/`에 둡니다.
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -35,20 +49,48 @@ python -m pytest
 python -m uvicorn app.main:app --reload
 ```
 
-브라우저에서 다음을 확인합니다.
-
-- `http://127.0.0.1:8000/healthz`: 프로세스 생존 여부
-- `http://127.0.0.1:8000/readyz`: 모델 로드·배포 승인 여부
-- `http://127.0.0.1:8000/status`: 차단 사유와 모델 계약
-- `http://127.0.0.1:8000/docs`: API 문서 및 직접 요청
-- `http://127.0.0.1:8000/dashboard`: 최근 예측 대시보드
-
-## 미승인 v2 baseline 확인
-
-현재 baseline은 KPI 미달이므로 기본 설정에서 `/readyz`와 `/predict`가 `503`을 반환하는 것이 정상입니다. 수업용 통합 검증에 한해 `ALLOW_UNAPPROVED_MODEL=true`로 실행할 수 있으며, 응답에는 미승인 및 개발 예외 상태가 함께 표시됩니다. 실제 배포에는 이 옵션을 사용하지 않습니다.
+Docker 실행:
 
 ```bash
-python scripts/smoke_request.py
+docker compose up --build -d
+docker compose ps
+docker compose logs -f api
 ```
 
-세부 내용은 [v2-v3 연결](docs/01_v2_v3_연결.md)과 [실행 절차](docs/02_실행_절차.md)를 참고합니다.
+확인 주소:
+
+- `/healthz`: API 프로세스 생존 여부
+- `/readyz`: 모델 로드 및 KPI 승인 준비 상태
+- `/status`: 차단 원인과 모델 계약 정보
+- `/docs`: OpenAPI 문서
+- `/dashboard`: 최근 예측 대시보드
+
+현재 baseline처럼 KPI 미승인 번들은 수업용 로컬 검증에만 `ALLOW_UNAPPROVED_MODEL=true`로 실행할 수 있습니다. AWS 서비스 템플릿은 이 값을 항상 `false`로 고정합니다.
+
+## AWS 배포 순서
+
+1. `infra/foundation.yaml`로 S3·ECR·GitHub OIDC 역할 생성
+2. KPI 승인 모델 번들을 `models/approved/`에 게시
+3. Docker 이미지를 ECR에 최초 Push
+4. `infra/service.yaml`로 ECS Fargate·ALB 생성
+5. CloudFormation Outputs를 GitHub Environment Variables에 등록
+6. `develop` PR에서 CI 통과 확인
+7. `main` 병합 후 `v4.0.0` 태그 Push 또는 수동 CD 실행
+8. Actions에서 ECS 안정화와 `/healthz`, `/readyz` 통과 확인
+
+구체적인 명령과 Variables 매핑은 [v4 AWS CI/CD 실행 절차](docs/04_v4_AWS_CICD_실행_절차.md)를 따릅니다.
+
+## 운영상 주의사항
+
+- ALB의 인프라 health check는 `/healthz`, 배포 완료 검증은 `/readyz`까지 사용합니다.
+- S3에는 승인 모델만 게시하며 버킷 버전 관리를 활성화합니다.
+- ECR 이미지는 Git commit SHA 태그를 사용하고 태그 변경을 금지합니다.
+- 현재 SQLite는 Fargate 임시 디스크에 있으므로 Task 교체 시 이력이 유지되지 않습니다. v4 학습 범위에서는 허용하되 실제 운영에서는 RDS·DynamoDB·외부 로그 저장소로 분리해야 합니다.
+- 현재 ALB Listener는 수업용 HTTP입니다. 실제 공개 운영에서는 ACM 인증서와 HTTPS Listener를 추가해야 합니다.
+
+## 문서
+
+- [v2와 v3 연결](docs/01_v2_v3_연결.md)
+- [v3 로컬·Docker 실행](docs/02_실행_절차.md)
+- [v4 브랜치 전략](docs/03_v4_브랜치_전략.md)
+- [v4 AWS CI/CD 실행 절차](docs/04_v4_AWS_CICD_실행_절차.md)

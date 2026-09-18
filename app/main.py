@@ -10,6 +10,7 @@ from time import perf_counter
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
+from .artifact_sync import ArtifactSyncError, sync_model_bundle
 from .model_service import ModelArtifactError, ModelService
 from .schemas import PredictionRequest, PredictionResponse
 from .storage import PredictionStore
@@ -31,9 +32,13 @@ def create_app() -> FastAPI:
         app.state.model_service = None
         app.state.model_error = None
         try:
+            ## AWS 배포에서는 S3의 승인 모델 번들을 로컬 아티팩트 폴더로 내려받음
+            ## MODEL_ARTIFACT_S3_URI가 없으면 v3와 동일하게 기존 로컬 파일을 사용
+            artifact_dir = os.getenv("ARTIFACT_DIR", "artifacts")
+            sync_model_bundle(os.getenv("MODEL_ARTIFACT_S3_URI"), artifact_dir)
             ## ARTIFACT_DIR 미설정 시 프로젝트의 artifacts 폴더 사용
-            app.state.model_service = ModelService(os.getenv("ARTIFACT_DIR", "artifacts"))
-        except (ModelArtifactError, OSError, ValueError) as exc:
+            app.state.model_service = ModelService(artifact_dir)
+        except (ArtifactSyncError, ModelArtifactError, OSError, ValueError) as exc:
             ## 모델 로드 실패로 서버 전체가 종료되지 않도록 오류 메시지만 저장
             app.state.model_error = str(exc)
         ## 예측 결과를 저장할 SQLite 저장소 초기화
@@ -46,7 +51,7 @@ def create_app() -> FastAPI:
     ## FastAPI 애플리케이션 기본 정보와 생명주기 함수 등록
     app = FastAPI(
         title="Melting Tank KPI Serving API",
-        version="0.3.0",
+        version="0.4.0",
         description="v2에서 검증한 모델 번들로 다음 1분 NG를 예측합니다.",
         lifespan=lifespan,
     )
