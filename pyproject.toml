@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "melting-tank-kpi-mlops-serving"
-version = "0.3.0"
+version = "3.0.0"
 description = "FastAPI serving project for the melting-tank next-minute NG model"
 requires-python = ">=3.11,<3.13"
 dependencies = [
