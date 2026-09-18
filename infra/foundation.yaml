@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Melting Tank v4 foundation - model S3, ECR, and GitHub Actions OIDC role
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: melting-tank-kpi-mlops
+    AllowedPattern: "[a-z0-9-]+"
+  GitHubOwner:
+    Type: String
+    Default: youneedpython
+  GitHubRepository:
+    Type: String
+    Default: melting-tank-kpi-mlops-serving_
+  ExistingGitHubOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: Leave empty to create the account-level GitHub OIDC provider.
+
+Conditions:
+  CreateOidcProvider: !Equals [!Ref ExistingGitHubOidcProviderArn, ""]
+
+Resources:
+  ModelArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: RemoveIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  ContainerRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Sub "${ProjectName}/serving"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep the latest 20 untagged images",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 20
+                },
+                "action": {"type": "expire"}
+              }
+            ]
+          }
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-github-actions"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingGitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOwner}/${GitHubRepository}:ref:refs/heads/main"
+                  - !Sub "repo:${GitHubOwner}/${GitHubRepository}:ref:refs/tags/v4.*"
+                  - !Sub "repo:${GitHubOwner}/${GitHubRepository}:environment:production"
+      Policies:
+        - PolicyName: GitHubDeploymentPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcrAuthorization
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: EcrImagePush
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:DescribeImages
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !GetAtt ContainerRepository.Arn
+              - Sid: EcsDeployment
+                Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:UpdateService
+                Resource: "*"
+              - Sid: PassEcsRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+
+Outputs:
+  ModelArtifactBucketName:
+    Value: !Ref ModelArtifactBucket
+  EcrRepositoryName:
+    Value: !Ref ContainerRepository
+  EcrRepositoryUri:
+    Value: !GetAtt ContainerRepository.RepositoryUri
+  GitHubActionsRoleArn:
+    Value: !GetAtt GitHubActionsRole.Arn
+  GitHubOidcProviderArn:
+    Value: !If
+      - CreateOidcProvider
+      - !Ref GitHubOidcProvider
+      - !Ref ExistingGitHubOidcProviderArn

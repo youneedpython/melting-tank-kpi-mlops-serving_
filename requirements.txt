@@ -4,3 +4,4 @@ tensorflow-cpu==2.20.0
 numpy==2.2.6
 scikit-learn==1.7.2
 joblib==1.5.1
+boto3==1.40.30
