@@ -99,11 +99,8 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              StringLike:
-                token.actions.githubusercontent.com:sub:
-                  - !Sub "repo:${GitHubOwner}/${GitHubRepository}:ref:refs/heads/main"
-                  - !Sub "repo:${GitHubOwner}/${GitHubRepository}:ref:refs/tags/v4.*"
-                  - !Sub "repo:${GitHubOwner}/${GitHubRepository}:environment:production"
+                token.actions.githubusercontent.com:sub: "repo:youneedpython@68935981/melting-tank-kpi-mlops-serving_@1374163259:environment:production"
+
       Policies:
         - PolicyName: GitHubDeploymentPolicy
           PolicyDocument:
