@@ -2,6 +2,11 @@ name: Deploy to AWS ECS
 
 on:
   workflow_dispatch:
+<<<<<<< Updated upstream
+=======
+
+
+>>>>>>> Stashed changes
   push:
     tags:
       - "v4.*"
