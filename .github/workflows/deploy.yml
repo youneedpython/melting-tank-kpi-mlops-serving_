@@ -2,7 +2,6 @@ name: Deploy to AWS ECS
 
 on:
   workflow_dispatch:
-
   push:
     tags:
       - "v4.*"
