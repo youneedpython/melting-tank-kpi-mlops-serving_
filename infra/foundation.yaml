@@ -101,6 +101,7 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
                 token.actions.githubusercontent.com:sub: "repo:youneedpython@68935981/melting-tank-kpi-mlops-serving_@1374163259:environment:production"
 
+
       Policies:
         - PolicyName: GitHubDeploymentPolicy
           PolicyDocument:
