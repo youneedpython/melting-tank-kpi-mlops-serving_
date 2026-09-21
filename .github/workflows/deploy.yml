@@ -43,9 +43,13 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+
       - name: Sign in to Amazon ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
+        env:
+            AWS_REGION: ${{ vars.AWS_REGION }}
+            AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
 
       - name: Build and push immutable image
         id: image
